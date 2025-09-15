@@ -1,9 +1,9 @@
 pipeline {
-  agent {
-    kubernetes {
-      label 'jenkins-dind'
-      defaultContainer 'docker'
-      yaml '''
+    agent {
+        kubernetes {
+            label 'jenkins-dind'
+            defaultContainer 'docker'
+            yaml '''
 apiVersion: v1
 kind: Pod
 spec:
@@ -40,65 +40,67 @@ spec:
   - name: dind-storage
     emptyDir: {}
 '''
-    }
-  }
-
-  environment {
-    GIT_URL     = 'https://github.com/Baluta-Lucian/conainters-SoD.git'
-    GIT_BRANCH  = 'main'
-    IMAGE       = "homework:${env.BUILD_NUMBER}"
-    CONTAINER   = 'homework_container'
-    PORT_MAP    = '8091:80'
-    HEALTH_URL  = 'http://localhost:8091'
-  }
-
-  stages {
-    stage('Clean dir') { steps { deleteDir() } }
-
-    stage('Clone git repo') {
-      steps { git branch: "${GIT_BRANCH}", url: "${GIT_URL}" }
-    }
-
-    stage('Wait for Docker daemon') {
-      steps {
-        container('docker') {
-          sh '''
-            set -euxo pipefail
-            # ensure client-side TLS vars are not set
-            unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
-
-            # wait up to 60s for dockerd HTTP ping
-            for i in $(seq 1 60); do
-              if curl -fsS http://localhost:2375/_ping | grep -q OK; then
-                docker version >/dev/null
-                exit 0
-              fi
-              echo "Waiting for dockerd on ${DOCKER_HOST} ..."
-              sleep 1
-            done
-            echo "dockerd did not become ready in time" >&2
-            exit 1
-          '''
         }
-      }
     }
 
-    stage('Build image') {
-      steps {
-        container('docker') {
-          sh '''
+    environment {
+        GIT_URL     = 'https://github.com/Baluta-Lucian/conainters-SoD.git'
+        GIT_BRANCH  = 'main'
+        IMAGE       = "homework:${env.BUILD_NUMBER}"
+        CONTAINER   = 'homework_container'
+        PORT_MAP    = '8091:80'
+        HEALTH_URL  = 'http://localhost:8091'
+    }
+
+    stages {
+        stage('Clean dir') { steps { deleteDir() } }
+
+        stage('Clone git repo') {
+            steps { git branch: "${GIT_BRANCH}", url: "${GIT_URL}" }
+        }
+
+        stage('Wait for Docker daemon') {
+            steps {
+                container('docker') {
+                    sh '''
+        set -euxo pipefail
+        # make sure client-side TLS vars are off
+        unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
+
+        # Wait up to 90s for dockerd to answer
+        for i in $(seq 1 90); do
+          if docker version >/dev/null 2>&1; then
+            echo "dockerd is up"
+            docker info | sed -n '1,25p'
+            exit 0
+          fi
+          echo "Waiting for dockerd on ${DOCKER_HOST} ..."
+          sleep 1
+        done
+
+        echo "dockerd did not become ready in time" >&2
+        exit 1
+      '''
+                }
+            }
+        }
+
+        stage('Build image') {
+            steps {
+                container('docker') {
+                    sh '''
             set -euxo pipefail
             unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
             docker build -t "${IMAGE}" .
           '''
+                }
+            }
         }
-      }
-    }
 
-    stage('Run container') {
-      steps {
-        container('docker') {
-          sh '''
+        stage('Run container') {
+            steps {
+                container('docker') {
+                    sh '''
             set -euxo pipefail
             unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
             docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
@@ -116,14 +118,14 @@ spec:
             docker logs "${CONTAINER}" || true
             exit 1
           '''
+                }
+            }
         }
-      }
-    }
 
-    stage('Test application') {
-      steps {
-        container('docker') {
-          sh '''
+        stage('Test application') {
+            steps {
+                container('docker') {
+                    sh '''
             set -euxo pipefail
             unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
             code=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}")
@@ -135,22 +137,22 @@ spec:
               exit 1
             fi
           '''
+                }
+            }
         }
-      }
     }
-  }
 
-  post {
-    always {
-      container('docker') {
-        sh '''
+    post {
+        always {
+            container('docker') {
+                sh '''
           set -eux
           unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
           docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" || true
           docker logs "${CONTAINER}" || true
           # docker rm -f "${CONTAINER}" || true  # uncomment if you want cleanup
         '''
-      }
+            }
+        }
     }
-  }
 }
