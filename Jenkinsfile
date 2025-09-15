@@ -1,5 +1,5 @@
 pipeline {
-    agent { dockerfile true }
+    agent { dockerContainer true }
 
     stages {
         stage('Clean dir') {
