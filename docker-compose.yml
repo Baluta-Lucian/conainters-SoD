@@ -1,0 +1,8 @@
+version: "3.9"
+services:
+  app:
+    build: .
+    image: homework1-container:1.1
+    ports:
+      - "8081:80"
+    restart: unless-stopped
