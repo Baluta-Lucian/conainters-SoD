@@ -1,63 +1,129 @@
 pipeline {
-    agent {
-        dockerContainer {
-            image 'docker:latest'
-            args '-v /var/run/docker.sock:/var/run/docker.sock'
-        }
+  agent {
+    kubernetes {
+      label 'jenkins-dind'
+      defaultContainer 'docker'
+      yaml '''
+apiVersion: v1
+kind: Pod
+spec:
+  serviceAccountName: jenkins
+  securityContext:
+    runAsUser: 0
+  containers:
+  - name: docker
+    image: docker:24-cli
+    command: ["sh","-c","sleep 365d"]
+    tty: true
+    env:
+    - name: DOCKER_HOST
+      value: tcp://localhost:2375
+    - name: DOCKER_TLS_VERIFY
+      value: "0"
+  - name: dind
+    image: docker:24-dind
+    securityContext:
+      privileged: true        # REQUIRED for DinD
+    args:
+    - --host=tcp://0.0.0.0:2375
+    - --host=unix:///var/run/docker.sock
+    - --tls=false
+    volumeMounts:
+    - name: dind-storage
+      mountPath: /var/lib/docker
+  volumes:
+  - name: dind-storage
+    emptyDir: {}
+'''
+    }
+  }
+
+  environment {
+    GIT_URL     = 'https://github.com/Baluta-Lucian/conainters-SoD.git'
+    GIT_BRANCH  = 'main'
+
+    IMAGE       = "homework:${env.BUILD_NUMBER}"
+    CONTAINER   = 'homework_container'
+    PORT_MAP    = '8091:80'
+    HEALTH_URL  = 'http://localhost:8091'
+  }
+
+  stages {
+    stage('Clean dir') {
+      steps { deleteDir() }
     }
 
-    environment {
-        DOCKER_HOST = 'tcp://localhost:2375'
-        DOCKER_TLS_VERIFY = '0'
+    stage('Clone git repo') {
+      steps {
+        git branch: "${GIT_BRANCH}", url: "${GIT_URL}"
+      }
     }
 
-    stages {
-        stage('Clean dir') {
-            steps {
-                deleteDir()
-            }
+    stage('Build image') {
+      steps {
+        container('docker') {
+          sh '''
+            set -euxo pipefail
+            docker version
+            docker build -t "${IMAGE}" .
+          '''
         }
-        stage('clone git repo') {
-            steps {
-                git branch: 'main', url: 'https://github.com/Baluta-Lucian/conainters-SoD.git'
-            }
-        }
-        stage('Setup Container') {
-            steps {
-                sh '''
-                    echo "Setting up container..."
-                    docker build -t homework:${BUILD_NUMBER} .
-                    docker ps | grep homework_container && docker stop homework_container && docker rm homework_container || echo "No existing container to remove"
-                    docker run -d -p 8091:80 --name homework_container homework:${BUILD_NUMBER}
-                    echo "Container is up and running on port 8091"
-                '''
-            }
-        }
-        stage('Test Application') {
-            steps {
-                sh '''
-                    echo "Testing application..."
-                    sleep 10  # Wait for the container to be fully up
-                    response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8091)
-                    if [ "$response" -eq 200 ]; then
-                        echo "Application is running successfully!"
-                    else
-                        echo "Application test failed with status code: $response"
-                        exit 1
-                    fi
-                '''
-            }
-        }
-    // stage('Cleanup') {
-    //     steps {
-    //         sh '''
-    //             echo "Cleaning up..."
-    //             docker stop homework_container
-    //             docker rm homework_container
-    //             docker rmi homework:${BUILD_NUMBER}
-    //             echo "Cleanup completed."
-    //         '''
-    //     }
-    // }
+      }
     }
+
+    stage('Run container') {
+      steps {
+        container('docker') {
+          sh '''
+            set -euxo pipefail
+            docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+            docker run -d --name "${CONTAINER}" -p ${PORT_MAP} "${IMAGE}"
+            echo "Container started on ${PORT_MAP}"
+
+            # Wait up to 60s for the app to respond
+            for i in $(seq 1 60); do
+              if curl -fsS "${HEALTH_URL}" >/dev/null 2>&1; then
+                echo "Container is healthy"
+                exit 0
+              fi
+              sleep 1
+            done
+            echo "Container failed to become healthy in time" >&2
+            docker logs "${CONTAINER}" || true
+            exit 1
+          '''
+        }
+      }
+    }
+
+    stage('Test application') {
+      steps {
+        container('docker') {
+          sh '''
+            set -euxo pipefail
+            code=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}")
+            if [ "$code" -eq 200 ]; then
+              echo "Application is running successfully!"
+            else
+              echo "Application test failed with status code: $code"
+              docker logs "${CONTAINER}" || true
+              exit 1
+            fi
+          '''
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      container('docker') {
+        sh '''
+          set -eux
+          docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" || true
+          docker logs "${CONTAINER}" || true
+        '''
+      }
+    }
+  }
 }
