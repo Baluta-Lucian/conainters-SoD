@@ -101,23 +101,31 @@ spec:
             steps {
                 container('docker') {
                     sh '''
-            set -euxo pipefail
-            unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
-            docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
-            docker run -d --name "${CONTAINER}" -p ${PORT_MAP} "${IMAGE}"
-            echo "Container started on ${PORT_MAP}"
+        set -euxo pipefail
+        unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
 
-            for i in $(seq 1 60); do
-              if curl -fsS "${HEALTH_URL}" >/dev/null 2>&1; then
-                echo "Container is healthy"
-                exit 0
-              fi
-              sleep 1
-            done
-            echo "Container failed to become healthy in time" >&2
-            docker logs "${CONTAINER}" || true
-            exit 1
-          '''
+        docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+        docker run -d --name "${CONTAINER}" -p ${PORT_MAP} "${IMAGE}"
+        echo "Container started on ${PORT_MAP}"
+
+        # Prefer checking from INSIDE the container (no NAT flakiness)
+        for i in $(seq 1 60); do
+          if docker exec "${CONTAINER}" sh -lc 'wget -qO- http://127.0.0.1:80 >/dev/null 2>&1'; then
+            echo "Container is healthy"
+            exit 0
+          fi
+          # Fallback: also try the published port from the pod namespace
+          if wget -qO- "http://127.0.0.1:8091" >/dev/null 2>&1; then
+            echo "Container is healthy (via 8091)"
+            exit 0
+          fi
+          sleep 1
+        done
+
+        echo "Container failed to become healthy in time" >&2
+        docker logs "${CONTAINER}" || true
+        exit 1
+      '''
                 }
             }
         }
