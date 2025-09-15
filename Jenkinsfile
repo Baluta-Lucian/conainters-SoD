@@ -18,10 +18,14 @@ spec:
     env:
     - name: DOCKER_HOST
       value: tcp://localhost:2375
+
   - name: dind
     image: docker:24-dind
     securityContext:
       privileged: true
+    env:
+    - name: DOCKER_TLS_CERTDIR      # <-- turns off TLS in the daemon
+      value: ""
     args:
     - --host=tcp://0.0.0.0:2375
     - --host=unix:///var/run/docker.sock
@@ -31,6 +35,7 @@ spec:
     volumeMounts:
     - name: dind-storage
       mountPath: /var/lib/docker
+
   volumes:
   - name: dind-storage
     emptyDir: {}
@@ -48,14 +53,10 @@ spec:
   }
 
   stages {
-    stage('Clean dir') {
-      steps { deleteDir() }
-    }
+    stage('Clean dir') { steps { deleteDir() } }
 
     stage('Clone git repo') {
-      steps {
-        git branch: "${GIT_BRANCH}", url: "${GIT_URL}"
-      }
+      steps { git branch: "${GIT_BRANCH}", url: "${GIT_URL}" }
     }
 
     stage('Wait for Docker daemon') {
@@ -63,10 +64,13 @@ spec:
         container('docker') {
           sh '''
             set -euxo pipefail
+            # ensure client-side TLS vars are not set
             unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
+
+            # wait up to 60s for dockerd HTTP ping
             for i in $(seq 1 60); do
-              if docker version >/dev/null 2>&1; then
-                docker info | sed -n '1,20p'
+              if curl -fsS http://localhost:2375/_ping | grep -q OK; then
+                docker version >/dev/null
                 exit 0
               fi
               echo "Waiting for dockerd on ${DOCKER_HOST} ..."
@@ -144,8 +148,7 @@ spec:
           unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
           docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" || true
           docker logs "${CONTAINER}" || true
-          # uncomment to clean:
-          # docker rm -f "${CONTAINER}" || true
+          # docker rm -f "${CONTAINER}" || true  # uncomment if you want cleanup
         '''
       }
     }
