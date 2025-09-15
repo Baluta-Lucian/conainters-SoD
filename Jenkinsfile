@@ -18,16 +18,16 @@ spec:
     env:
     - name: DOCKER_HOST
       value: tcp://localhost:2375
-    - name: DOCKER_TLS_VERIFY
-      value: "0"
   - name: dind
     image: docker:24-dind
     securityContext:
-      privileged: true        # REQUIRED for DinD
+      privileged: true
     args:
     - --host=tcp://0.0.0.0:2375
     - --host=unix:///var/run/docker.sock
     - --tls=false
+    - --storage-driver=overlay2
+    - --mtu=1450
     volumeMounts:
     - name: dind-storage
       mountPath: /var/lib/docker
@@ -41,7 +41,6 @@ spec:
   environment {
     GIT_URL     = 'https://github.com/Baluta-Lucian/conainters-SoD.git'
     GIT_BRANCH  = 'main'
-
     IMAGE       = "homework:${env.BUILD_NUMBER}"
     CONTAINER   = 'homework_container'
     PORT_MAP    = '8091:80'
@@ -59,12 +58,33 @@ spec:
       }
     }
 
+    stage('Wait for Docker daemon') {
+      steps {
+        container('docker') {
+          sh '''
+            set -euxo pipefail
+            unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
+            for i in $(seq 1 60); do
+              if docker version >/dev/null 2>&1; then
+                docker info | sed -n '1,20p'
+                exit 0
+              fi
+              echo "Waiting for dockerd on ${DOCKER_HOST} ..."
+              sleep 1
+            done
+            echo "dockerd did not become ready in time" >&2
+            exit 1
+          '''
+        }
+      }
+    }
+
     stage('Build image') {
       steps {
         container('docker') {
           sh '''
             set -euxo pipefail
-            docker version
+            unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
             docker build -t "${IMAGE}" .
           '''
         }
@@ -76,11 +96,11 @@ spec:
         container('docker') {
           sh '''
             set -euxo pipefail
+            unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
             docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
             docker run -d --name "${CONTAINER}" -p ${PORT_MAP} "${IMAGE}"
             echo "Container started on ${PORT_MAP}"
 
-            # Wait up to 60s for the app to respond
             for i in $(seq 1 60); do
               if curl -fsS "${HEALTH_URL}" >/dev/null 2>&1; then
                 echo "Container is healthy"
@@ -101,6 +121,7 @@ spec:
         container('docker') {
           sh '''
             set -euxo pipefail
+            unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
             code=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}")
             if [ "$code" -eq 200 ]; then
               echo "Application is running successfully!"
@@ -120,8 +141,11 @@ spec:
       container('docker') {
         sh '''
           set -eux
+          unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH || true
           docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" || true
           docker logs "${CONTAINER}" || true
+          # uncomment to clean:
+          # docker rm -f "${CONTAINER}" || true
         '''
       }
     }

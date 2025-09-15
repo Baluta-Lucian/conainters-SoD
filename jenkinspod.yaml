@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: "2025-09-12T06:50:00Z"
+  generation: 1
+  labels:
+    workload.user.cattle.io/workloadselector: pod-default-jenkinspod
+  name: jenkinspod
+  namespace: default
+  resourceVersion: "52361"
+  uid: a21f0c1f-99d9-4226-846e-bb664a35e0bb
+spec:
+  affinity: {}
+  containers:
+  - image: jenkins/jenkins:lts
+    imagePullPolicy: Always
+    name: container-0
+    ports:
+    - containerPort: 8080
+      name: jenkinssrv
+      protocol: TCP
+    resources: {}
+    terminationMessagePath: /dev/termination-log
+    terminationMessagePolicy: File
+    volumeMounts:
+    - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+      name: kube-api-access-jgzbk
+      readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  nodeName: endautorbdrv2pz
+  preemptionPolicy: PreemptLowerPriority
+  priority: 0
+  restartPolicy: Always
+  schedulerName: default-scheduler
+  securityContext: {}
+  serviceAccountName: jenkins
+  automountServiceAccountToken: true
+  terminationGracePeriodSeconds: 30
+  tolerations:
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
+  volumes:
+  - name: kube-api-access-jgzbk
+    projected:
+      defaultMode: 420
+      sources:
+      - serviceAccountToken:
+          expirationSeconds: 3607
+          path: token
+      - configMap:
+          items:
+          - key: ca.crt
+            path: ca.crt
+          name: kube-root-ca.crt
+      - downwardAPI:
+          items:
+          - fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+            path: namespace
+
