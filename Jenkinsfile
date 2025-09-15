@@ -1,5 +1,12 @@
 pipeline {
-    agent { dockerContainer true }
+    agent dockerContainer('docker:20.10.16-dind') {
+        args '-v /var/run/docker.sock:/var/run/docker.sock'
+    }
+
+    environment {
+        DOCKER_HOST = 'tcp://localhost:2375'
+        DOCKER_TLS_VERIFY = '0'
+    }
 
     stages {
         stage('Clean dir') {
@@ -14,7 +21,6 @@ pipeline {
         }
         stage('Setup Container') {
             steps {
-                dir ('containers-SoD')
                 sh '''
                     echo "Setting up container..."
                     docker build -t homework:${BUILD_NUMBER} .
@@ -39,16 +45,16 @@ pipeline {
                 '''
             }
         }
-        // stage('Cleanup') {
-        //     steps {
-        //         sh '''
-        //             echo "Cleaning up..."
-        //             docker stop homework_container
-        //             docker rm homework_container
-        //             docker rmi homework:${BUILD_NUMBER}
-        //             echo "Cleanup completed."
-        //         '''
-        //     }
-        // }
+    // stage('Cleanup') {
+    //     steps {
+    //         sh '''
+    //             echo "Cleaning up..."
+    //             docker stop homework_container
+    //             docker rm homework_container
+    //             docker rmi homework:${BUILD_NUMBER}
+    //             echo "Cleanup completed."
+    //         '''
+    //     }
+    // }
     }
 }
