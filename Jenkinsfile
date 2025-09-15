@@ -1,6 +1,9 @@
 pipeline {
-    agent dockerContainer('docker:20.10.16-dind') {
-        args '-v /var/run/docker.sock:/var/run/docker.sock'
+    agent {
+        dockerContainer {
+            image 'docker:latest'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'
+        }
     }
 
     environment {
