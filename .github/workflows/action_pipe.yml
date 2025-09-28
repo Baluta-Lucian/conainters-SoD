@@ -1,4 +1,4 @@
-name: Local build & run (Windows self-hosted)
+name: Local build & run (Windows + Rancher)
 
 on:
   workflow_dispatch:
@@ -11,8 +11,8 @@ permissions:
 env:
   IMAGE_NAME: myapp
   DOCKERFILE: Dockerfile
-  PORT: "80"                # container port
-  HOST_PORT: "8099"           # host port
+  PORT: "80"
+  HOST_PORT: "8099"
 
 jobs:
   local:
@@ -21,33 +21,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure Rancher Docker context
+      - name: Sanity check Docker (Rancher Desktop)
         run: |
-          docker context ls
-          docker context use rancher-desktop
+          docker version
           docker info
+          docker context ls
 
-      - name: Build image locally (and add stable tag)
+      - name: Build image & capture ID
         run: |
           $env:TAG = "${{ github.sha }}"
-          docker build -f "$env:DOCKERFILE" -t "$env:IMAGE_NAME:$env:TAG" .
-          # add a stable tag so the next step doesn't rely only on the SHA
-          docker tag "$env:IMAGE_NAME:$env:TAG" "$env:IMAGE_NAME:ci"
-          "TAG=$($env:TAG)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $img = "$env:IMAGE_NAME`:$env:TAG"
+          docker build -f "$env:DOCKERFILE" -t "$img" .
+          # optional stable tag (handy for debugging)
+          docker tag "$img" "$env:IMAGE_NAME:ci"
+          # capture the immutable image ID
+          $id = docker inspect -f "{{.Id}}" "$img"
+          "TAG=$($env:TAG)"       | Out-File -FilePath $env:GITHUB_ENV -Append
+          "IMAGE=$img"            | Out-File -FilePath $env:GITHUB_ENV -Append
+          "IMAGE_ID=$id"          | Out-File -FilePath $env:GITHUB_ENV -Append
           docker images "$env:IMAGE_NAME" --format '{{.Repository}}:{{.Tag}} -> {{.ID}}'
 
-      - name: Replace running container (no pulling)
+      - name: Replace running container (never pull)
         run: |
-          # stop/remove if exists
           if (docker ps -a --format '{{.Names}}' | Select-String -SimpleMatch $env:IMAGE_NAME) {
             docker stop $env:IMAGE_NAME 2>$null; docker rm $env:IMAGE_NAME 2>$null
           }
-          # run from the local 'ci' tag; prevent accidental pull from Hub
           docker run --pull=never -d --name $env:IMAGE_NAME `
-            -p "$env:HOST_PORT:$env:PORT" `
-            "$env:IMAGE_NAME:ci"
+            -p "$env:HOST_PORT`:$env:PORT" `
+            $env:IMAGE_ID
 
-      - name: Show status / URL
+      - name: Status / URL
         run: |
           docker ps --filter "name=$env:IMAGE_NAME"
           "Open: http://localhost:$env:HOST_PORT" | Out-Host
