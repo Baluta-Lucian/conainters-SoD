@@ -1,44 +1,36 @@
-name: Local build & run (self-hosted)
-
-on:
-  workflow_dispatch:
-  push:
-    branches: [ main ]
+name: Local build & run (Windows self-hosted)
+on: [workflow_dispatch, push]
 
 permissions:
   contents: read
-  packages: read
 
 env:
-  IMAGE_NAME: homeworkaction
+  IMAGE_NAME: myapp
   DOCKERFILE: Dockerfile
-  PORT: "80"
-  HOST_PORT: "8099"
+  PORT: "80"      # container port
+  HOST_PORT: "8099" # host port
 
 jobs:
   local:
-    runs-on: [self-hosted, docker]
+    runs-on: [self-hosted, windows, docker]
+    defaults: { run: { shell: pwsh } }
     steps:
       - uses: actions/checkout@v4
-
       - name: Build image
         run: |
-          set -euo pipefail
-          TAG=${{ github.sha }}
-          docker build -f "$DOCKERFILE" -t "$IMAGE_NAME:$TAG" .
-          echo "TAG=$TAG" >> $GITHUB_ENV
-
+          $env:TAG = "${{ github.sha }}"
+          docker build -f "$env:DOCKERFILE" -t "$env:IMAGE_NAME:$env:TAG" .
+          "TAG=$($env:TAG)" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Replace running container
         run: |
-          set -euo pipefail
-          docker ps -a --format '{{.Names}}' | grep -q '^${{ env.IMAGE_NAME }}$' && \
-            (docker stop ${{ env.IMAGE_NAME }} || true; docker rm ${{ env.IMAGE_NAME }} || true) || true
-          docker run -d --name ${{ env.IMAGE_NAME }} \
-            -p $HOST_PORT:$PORT \
-            --restart unless-stopped \
-            "$IMAGE_NAME:$TAG"
-
-      - name: Show status
+          if (docker ps -a --format '{{.Names}}' | Select-String -SimpleMatch $env:IMAGE_NAME) {
+            docker stop $env:IMAGE_NAME 2>$null; docker rm $env:IMAGE_NAME 2>$null
+          }
+          docker run -d --name $env:IMAGE_NAME `
+            -p "$env:HOST_PORT`:$env:PORT" `
+            --restart unless-stopped `
+            "$env:IMAGE_NAME`:$env:TAG"
+      - name: Show status / URL
         run: |
-          docker ps --filter "name=${{ env.IMAGE_NAME }}"
-          echo "Open: http://localhost:${{ env.HOST_PORT }}"
+          docker ps --filter "name=$env:IMAGE_NAME"
+          "Open: http://localhost:$env:HOST_PORT" | Out-Host
