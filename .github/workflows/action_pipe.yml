@@ -1,5 +1,9 @@
 name: Local build & run (Windows self-hosted)
-on: [workflow_dispatch, push]
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -7,8 +11,8 @@ permissions:
 env:
   IMAGE_NAME: myapp
   DOCKERFILE: Dockerfile
-  PORT: "80"      # container port
-  HOST_PORT: "8099" # host port
+  PORT: "80"                # container port
+  HOST_PORT: "8099"           # host port
 
 jobs:
   local:
@@ -16,19 +20,33 @@ jobs:
     defaults: { run: { shell: pwsh } }
     steps:
       - uses: actions/checkout@v4
-      - name: Build image
+
+      - name: Ensure Rancher Docker context
+        run: |
+          docker context ls
+          docker context use rancher-desktop
+          docker info
+
+      - name: Build image locally (and add stable tag)
         run: |
           $env:TAG = "${{ github.sha }}"
           docker build -f "$env:DOCKERFILE" -t "$env:IMAGE_NAME:$env:TAG" .
+          # add a stable tag so the next step doesn't rely only on the SHA
+          docker tag "$env:IMAGE_NAME:$env:TAG" "$env:IMAGE_NAME:ci"
           "TAG=$($env:TAG)" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Replace running container
+          docker images "$env:IMAGE_NAME" --format '{{.Repository}}:{{.Tag}} -> {{.ID}}'
+
+      - name: Replace running container (no pulling)
         run: |
+          # stop/remove if exists
           if (docker ps -a --format '{{.Names}}' | Select-String -SimpleMatch $env:IMAGE_NAME) {
             docker stop $env:IMAGE_NAME 2>$null; docker rm $env:IMAGE_NAME 2>$null
           }
-          docker run -d --name $env:IMAGE_NAME `
-            -p "$env:HOST_PORT`:$env:PORT" `
-            "$env:IMAGE_NAME`:$env:TAG"
+          # run from the local 'ci' tag; prevent accidental pull from Hub
+          docker run --pull=never -d --name $env:IMAGE_NAME `
+            -p "$env:HOST_PORT:$env:PORT" `
+            "$env:IMAGE_NAME:ci"
+
       - name: Show status / URL
         run: |
           docker ps --filter "name=$env:IMAGE_NAME"
