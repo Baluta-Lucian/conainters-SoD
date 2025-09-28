@@ -28,7 +28,6 @@ jobs:
           }
           docker run -d --name $env:IMAGE_NAME `
             -p "$env:HOST_PORT`:$env:PORT" `
-            --restart unless-stopped `
             "$env:IMAGE_NAME`:$env:TAG"
       - name: Show status / URL
         run: |
