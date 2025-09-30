@@ -7,8 +7,8 @@ jobs:
     environment:
       IMAGE_NAME: myapp
       DOCKERFILE: Dockerfile
-      PORT: "80"       # container's listening port
-      HOST_PORT: "8100"  # the host port to expose
+      PORT: "80"          # container listens here
+      HOST_PORT: "8100"   # expose on host
     steps:
       - checkout
 
@@ -23,16 +23,14 @@ jobs:
           command: |
             TAG=${CIRCLE_SHA1}
             docker build -f "$DOCKERFILE" -t "$IMAGE_NAME:$TAG" .
-            # optional stable tag for quick manual runs
             docker tag "$IMAGE_NAME:$TAG" "$IMAGE_NAME:ci"
             echo "Built: $IMAGE_NAME:$TAG"
 
       - run:
-          name: Replace running container
+          name: Replace running container (no pulls)
           command: |
             docker ps -a --format '{{.Names}}' | grep -q "^${IMAGE_NAME}$" && \
               (docker stop "$IMAGE_NAME" || true; docker rm "$IMAGE_NAME" || true) || true
-            # Use --pull=never so Docker never tries a registry
             docker run --pull=never -d --name "$IMAGE_NAME" \
               -p "${HOST_PORT}:${PORT}" \
               --restart unless-stopped \
@@ -43,3 +41,8 @@ jobs:
           command: |
             docker ps --filter "name=${IMAGE_NAME}"
             echo "Open: http://localhost:${HOST_PORT}"
+
+workflows:
+  deploy_local_wf:
+    jobs:
+      - deploy_local
