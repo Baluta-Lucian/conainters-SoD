@@ -1,0 +1,45 @@
+version: 2.1
+
+jobs:
+  deploy_local:
+    machine: true
+    resource_class: balutalucian/selfhosted
+    environment:
+      IMAGE_NAME: myapp
+      DOCKERFILE: Dockerfile
+      PORT: "80"       # container's listening port
+      HOST_PORT: "8100"  # the host port to expose
+    steps:
+      - checkout
+
+      - run:
+          name: Show Docker info
+          command: |
+            docker version
+            docker info
+
+      - run:
+          name: Build image
+          command: |
+            TAG=${CIRCLE_SHA1}
+            docker build -f "$DOCKERFILE" -t "$IMAGE_NAME:$TAG" .
+            # optional stable tag for quick manual runs
+            docker tag "$IMAGE_NAME:$TAG" "$IMAGE_NAME:ci"
+            echo "Built: $IMAGE_NAME:$TAG"
+
+      - run:
+          name: Replace running container
+          command: |
+            docker ps -a --format '{{.Names}}' | grep -q "^${IMAGE_NAME}$" && \
+              (docker stop "$IMAGE_NAME" || true; docker rm "$IMAGE_NAME" || true) || true
+            # Use --pull=never so Docker never tries a registry
+            docker run --pull=never -d --name "$IMAGE_NAME" \
+              -p "${HOST_PORT}:${PORT}" \
+              --restart unless-stopped \
+              "$IMAGE_NAME:${CIRCLE_SHA1}"
+
+      - run:
+          name: Show status / URL
+          command: |
+            docker ps --filter "name=${IMAGE_NAME}"
+            echo "Open: http://localhost:${HOST_PORT}"
